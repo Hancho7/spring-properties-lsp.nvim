@@ -4,12 +4,9 @@ const {
   createConnection,
   TextDocuments,
   ProposedFeatures,
-  InitializeParams,
   DidChangeConfigurationNotification,
   CompletionItem,
   CompletionItemKind,
-  TextDocumentPositionParams,
-  Hover,
   MarkupKind,
 } = require("vscode-languageserver/node");
 const { TextDocument } = require("vscode-languageserver-textdocument");
@@ -69,8 +66,7 @@ const springProperties = {
   },
   "spring.profiles.include": {
     type: "string",
-    description:
-      "Unconditionally activate the specified comma-separated list of profiles",
+    description: "Unconditionally activate the specified comma-separated list of profiles",
   },
   "spring.main.banner-mode": {
     type: "string",
@@ -108,8 +104,7 @@ const springProperties = {
   },
   "spring.datasource.hikari.connection-timeout": {
     type: "duration",
-    description:
-      "Maximum number of milliseconds that a client will wait for a connection",
+    description: "Maximum number of milliseconds that a client will wait for a connection",
     default: "30000ms",
   },
 
@@ -176,14 +171,12 @@ const springProperties = {
   "logging.pattern.console": {
     type: "string",
     description: "Appender pattern for output to the console",
-    default:
-      "%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
+    default: "%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
   },
   "logging.pattern.file": {
     type: "string",
     description: "Appender pattern for output to a file",
-    default:
-      "%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
+    default: "%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
   },
   "logging.file.name": {
     type: "string",
@@ -215,21 +208,11 @@ const springProperties = {
   "spring.cache.type": {
     type: "string",
     description: "Cache type",
-    enum: [
-      "generic",
-      "ehcache",
-      "hazelcast",
-      "infinispan",
-      "jcache",
-      "redis",
-      "simple",
-      "none",
-    ],
+    enum: ["generic", "ehcache", "hazelcast", "infinispan", "jcache", "redis", "simple", "none"],
   },
   "spring.cache.cache-names": {
     type: "string",
-    description:
-      "Comma-separated list of cache names to create if supported by the underlying cache manager",
+    description: "Comma-separated list of cache names to create if supported by the underlying cache manager",
   },
 
   // Redis properties
@@ -301,29 +284,25 @@ function extractExistingYamlPaths(yamlText) {
   const existingPaths = new Set();
   try {
     const obj = yaml.load(yamlText);
-    if (obj && typeof obj === "object") {
-      extractPathsFromObject(obj, "", existingPaths);
+    if (obj && typeof obj === 'object') {
+      extractPathsFromObject(obj, '', existingPaths);
     }
   } catch (error) {
-    const lines = yamlText.split("\n");
+    const lines = yamlText.split('\n');
     const pathStack = [];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
+      if (!trimmed || trimmed.startsWith('#')) continue;
       const indent = line.match(/^(\s*)/)[1].length;
       const keyMatch = line.match(/^\s*([a-zA-Z0-9._-]+):\s*(.*)$/);
       if (keyMatch) {
         const key = keyMatch[1];
-        const value = keyMatch[2].trim();
-        while (
-          pathStack.length > 0 &&
-          pathStack[pathStack.length - 1].indent >= indent
-        ) {
+        while (pathStack.length > 0 && pathStack[pathStack.length - 1].indent >= indent) {
           pathStack.pop();
         }
         pathStack.push({ key, indent });
-        const fullPath = pathStack.map((item) => item.key).join(".");
+        const fullPath = pathStack.map(item => item.key).join('.');
         existingPaths.add(fullPath);
       }
     }
@@ -335,21 +314,21 @@ function extractPathsFromObject(obj, prefix, pathSet) {
   for (const [key, value] of Object.entries(obj)) {
     const currentPath = prefix ? `${prefix}.${key}` : key;
     pathSet.add(currentPath);
-    if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
       extractPathsFromObject(value, currentPath, pathSet);
     }
   }
 }
 
 function getYamlContextAtPosition(document, position) {
-  const lines = document.getText().split("\n");
+  const lines = document.getText().split('\n');
   const currentLine = lines[position.line];
   const beforeCursor = currentLine.substring(0, position.character);
   const currentIndent = currentLine.match(/^(\s*)/)[1].length;
-  const isEmptyLine = beforeCursor.trim() === "";
+  const isEmptyLine = beforeCursor.trim() === '';
   const partialMatch = beforeCursor.match(/^\s*([a-zA-Z0-9._-]*)$/);
   const isTypingProperty = partialMatch !== null;
-  const partialText = isTypingProperty ? partialMatch[1] : "";
+  const partialText = isTypingProperty ? partialMatch[1] : '';
   const parentPath = buildYamlParentPath(lines, position.line, currentIndent);
   return {
     parentPath,
@@ -366,7 +345,7 @@ function buildYamlParentPath(lines, currentLine, currentIndent) {
   for (let i = currentLine - 1; i >= 0; i--) {
     const line = lines[i];
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!trimmed || trimmed.startsWith('#')) continue;
     const lineIndent = line.match(/^(\s*)/)[1].length;
     const keyMatch = line.match(/^\s*([a-zA-Z0-9._-]+):\s*(.*)$/);
     if (keyMatch && lineIndent < currentIndent) {
@@ -376,90 +355,73 @@ function buildYamlParentPath(lines, currentLine, currentIndent) {
       if (lineIndent === 0) break;
     }
   }
-  return pathStack.join(".");
+  return pathStack.join('.');
 }
 
 /**
- * Suggests properties for YAML, including siblings and children.
+ * FIXED: Suggests properties for YAML, including all siblings/children not yet present under the parent.
  */
-function findAvailableYamlProperties(
-  existingPaths,
-  parentPath,
-  partialText = "",
-) {
+function findAvailableYamlProperties(existingPaths, parentPath, partialText = '') {
   const allProps = Object.keys(springProperties);
-  const candidateProps = [];
-  const parentParts = parentPath ? parentPath.split(".") : [];
-  const depth = parentParts.length;
+
+  // Gather all properties that are direct children of parentPath
+  const children = new Map();
+  const parentPrefix = parentPath ? parentPath + '.' : '';
+  const parentDepth = parentPath ? parentPath.split('.').length : 0;
+
   for (const prop of allProps) {
-    const propParts = prop.split(".");
-    if (
-      (depth === 0 && propParts.length > 0) ||
-      (depth > 0 && prop.startsWith(parentPath + "."))
-    ) {
-      const nextKey = depth === 0 ? propParts[0] : propParts[depth];
-      if (!nextKey) continue;
-      const fullKeyPath = depth === 0 ? nextKey : parentPath + "." + nextKey;
-      const isLeaf = springProperties.hasOwnProperty(fullKeyPath);
-      if (
-        (isLeaf && existingPaths.has(fullKeyPath)) ||
-        (!isLeaf && existingPaths.has(fullKeyPath))
-      ) {
-        continue;
-      }
-      if (
-        partialText &&
-        !nextKey.toLowerCase().startsWith(partialText.toLowerCase())
-      ) {
-        continue;
-      }
-      if (!candidateProps.find((p) => p.key === nextKey)) {
-        const hasChildren = allProps.some(
-          (p) => p.startsWith(fullKeyPath + ".") && p !== fullKeyPath,
-        );
-        candidateProps.push({
-          key: nextKey,
-          fullPath: fullKeyPath,
-          isDirectProperty: isLeaf,
-          hasChildren,
-          config: springProperties[fullKeyPath] || null,
-        });
-      }
+    if (!prop.startsWith(parentPrefix)) continue;
+    const parts = prop.split('.');
+    if (parts.length <= parentDepth) continue; // Not a child
+    const childKey = parts[parentDepth];
+    const childFullPath = parentPrefix + childKey;
+    // Only suggest if this direct child is not already present
+    if (existingPaths.has(childFullPath)) continue;
+    if (partialText && !childKey.toLowerCase().startsWith(partialText.toLowerCase())) continue;
+    if (!children.has(childKey)) {
+      const isDirectProperty = springProperties.hasOwnProperty(childFullPath);
+      const hasChildren = allProps.some(
+        p => p.startsWith(childFullPath + '.') && p !== childFullPath
+      );
+      children.set(childKey, {
+        key: childKey,
+        fullPath: childFullPath,
+        isDirectProperty,
+        hasChildren,
+        config: springProperties[childFullPath] || null
+      });
     }
   }
-  return candidateProps;
+  return Array.from(children.values());
 }
 
 function getPropertiesContextAtPosition(document, position) {
-  const lines = document.getText().split("\n");
+  const lines = document.getText().split('\n');
   const currentLine = lines[position.line];
   const beforeCursor = currentLine.substring(0, position.character);
-  const equalsIndex = beforeCursor.indexOf("=");
+  const equalsIndex = beforeCursor.indexOf('=');
   if (equalsIndex !== -1) {
     return {
       isValue: true,
-      partialText: "",
+      partialText: '',
       propertyName: beforeCursor.substring(0, equalsIndex).trim(),
     };
   }
   const match = beforeCursor.match(/([a-zA-Z0-9._-]*)$/);
-  const partialText = match ? match[1] : "";
+  const partialText = match ? match[1] : '';
   return {
     isValue: false,
     partialText,
-    isEmptyLine: beforeCursor.trim() === "",
+    isEmptyLine: beforeCursor.trim() === '',
     isAtStartOfLine: beforeCursor.match(/^\s*[a-zA-Z0-9._-]*$/) !== null,
   };
 }
 
-function findAvailablePropertiesFileProps(existingProps, partialText = "") {
+function findAvailablePropertiesFileProps(existingProps, partialText = '') {
   const allSpringProps = Object.keys(springProperties);
   return allSpringProps.filter((prop) => {
     if (existingProps.has(prop)) return false;
-    if (
-      partialText &&
-      !prop.toLowerCase().startsWith(partialText.toLowerCase())
-    )
+    if (partialText && !prop.toLowerCase().startsWith(partialText.toLowerCase()))
       return false;
     return true;
   });
@@ -467,10 +429,10 @@ function findAvailablePropertiesFileProps(existingProps, partialText = "") {
 
 function extractExistingPropertiesFilePaths(propertiesText) {
   const existingProps = new Set();
-  const lines = propertiesText.split("\n");
+  const lines = propertiesText.split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!trimmed || trimmed.startsWith('#')) continue;
     const match = trimmed.match(/^([a-zA-Z0-9._-]+)\s*=/);
     if (match) {
       existingProps.add(match[1]);
@@ -529,10 +491,7 @@ connection.onInitialize((params) => {
 
 connection.onInitialized(() => {
   if (hasConfigurationCapability) {
-    connection.client.register(
-      DidChangeConfigurationNotification.type,
-      undefined,
-    );
+    connection.client.register(DidChangeConfigurationNotification.type, undefined);
   }
   if (hasWorkspaceFolderCapability) {
     connection.workspace.onDidChangeWorkspaceFolders((_event) => {
@@ -555,15 +514,12 @@ connection.onCompletion((textDocumentPosition) => {
 });
 
 function handleYamlCompletion(document, textDocumentPosition) {
-  const context = getYamlContextAtPosition(
-    document,
-    textDocumentPosition.position,
-  );
+  const context = getYamlContextAtPosition(document, textDocumentPosition.position);
   const existingPaths = extractExistingYamlPaths(document.getText());
   const availableProps = findAvailableYamlProperties(
     existingPaths,
     context.parentPath,
-    context.partialText,
+    context.partialText
   );
   const completionItems = availableProps.map((prop) => {
     const item = CompletionItem.create(prop.key);
@@ -572,9 +528,7 @@ function handleYamlCompletion(document, textDocumentPosition) {
     item.insertText = prop.key;
     if (prop.config) {
       item.detail = `${prop.config.type}${
-        prop.config.default !== undefined
-          ? ` (default: ${prop.config.default})`
-          : ""
+        prop.config.default !== undefined ? ` (default: ${prop.config.default})` : ''
       }`;
       item.documentation = {
         kind: MarkupKind.Markdown,
@@ -589,12 +543,46 @@ function handleYamlCompletion(document, textDocumentPosition) {
     }
     let replaceStartChar = textDocumentPosition.position.character;
     if (context.isTypingProperty && context.partialText) {
-      replaceStartChar =
-        textDocumentPosition.position.character - context.partialText.length;
+      replaceStartChar = textDocumentPosition.position.character - context.partialText.length;
     }
-    let insertionText = prop.key + ": ";
-    if (!prop.isDirectProperty && prop.hasChildren)
-      insertionText = prop.key + ":";
+    let insertionText = prop.key + ': ';
+    if (!prop.isDirectProperty && prop.hasChildren) insertionText = prop.key + ':';
+    item.textEdit = {
+      range: {
+        start: { line: textDocumentPosition.position.line, character: replaceStartChar },
+        end: { line: textDocumentPosition.position.line, character: textDocumentPosition.position.character },
+      },
+      newText: insertionText,
+    };
+    item.sortText = `${prop.isDirectProperty ? '1' : '2'}_${prop.key}`;
+    return item;
+  });
+  return completionItems;
+}
+
+function handlePropertiesCompletion(document, textDocumentPosition) {
+  const context = getPropertiesContextAtPosition(document, textDocumentPosition.position);
+  if (context.isValue) return [];
+  const existingProps = extractExistingPropertiesFilePaths(document.getText());
+  const availableProps = findAvailablePropertiesFileProps(existingProps, context.partialText);
+  const completionItems = availableProps.map((propName) => {
+    const config = springProperties[propName];
+    if (!config) return null;
+    const item = CompletionItem.create(propName);
+    item.kind = CompletionItemKind.Property;
+    item.label = propName;
+    item.insertText = propName + "=";
+    item.detail = `${config.type}${
+      config.default !== undefined ? ` (default: ${config.default})` : ''
+    }`;
+    item.documentation = {
+      kind: MarkupKind.Markdown,
+      value: createPropertyDocumentation(propName, config),
+    };
+    let replaceStartChar = textDocumentPosition.position.character;
+    if (context.partialText) {
+      replaceStartChar = textDocumentPosition.position.character - context.partialText.length;
+    }
     item.textEdit = {
       range: {
         start: {
@@ -606,62 +594,11 @@ function handleYamlCompletion(document, textDocumentPosition) {
           character: textDocumentPosition.position.character,
         },
       },
-      newText: insertionText,
+      newText: propName + "=",
     };
-    item.sortText = `${prop.isDirectProperty ? "1" : "2"}_${prop.key}`;
+    item.sortText = propName;
     return item;
-  });
-  return completionItems;
-}
-
-function handlePropertiesCompletion(document, textDocumentPosition) {
-  const context = getPropertiesContextAtPosition(
-    document,
-    textDocumentPosition.position,
-  );
-  if (context.isValue) return [];
-  const existingProps = extractExistingPropertiesFilePaths(document.getText());
-  const availableProps = findAvailablePropertiesFileProps(
-    existingProps,
-    context.partialText,
-  );
-  const completionItems = availableProps
-    .map((propName) => {
-      const config = springProperties[propName];
-      if (!config) return null;
-      const item = CompletionItem.create(propName);
-      item.kind = CompletionItemKind.Property;
-      item.label = propName;
-      item.insertText = propName + "=";
-      item.detail = `${config.type}${
-        config.default !== undefined ? ` (default: ${config.default})` : ""
-      }`;
-      item.documentation = {
-        kind: MarkupKind.Markdown,
-        value: createPropertyDocumentation(propName, config),
-      };
-      let replaceStartChar = textDocumentPosition.position.character;
-      if (context.partialText) {
-        replaceStartChar =
-          textDocumentPosition.position.character - context.partialText.length;
-      }
-      item.textEdit = {
-        range: {
-          start: {
-            line: textDocumentPosition.position.line,
-            character: replaceStartChar,
-          },
-          end: {
-            line: textDocumentPosition.position.line,
-            character: textDocumentPosition.position.character,
-          },
-        },
-        newText: propName + "=",
-      };
-      item.sortText = propName;
-      return item;
-    })
-    .filter((item) => item !== null);
+  }).filter(item => item !== null);
   return completionItems;
 }
 
@@ -684,10 +621,10 @@ connection.onHover((params) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) return null;
   const isYaml = isYamlFile(document.uri);
-  let propertyPath = "";
+  let propertyPath = '';
   if (isYaml) {
     const context = getYamlContextAtPosition(document, params.position);
-    const lines = document.getText().split("\n");
+    const lines = document.getText().split('\n');
     const currentLine = lines[params.position.line];
     const keyMatch = currentLine.match(/^\s*([a-zA-Z0-9._-]+):/);
     if (keyMatch) {
@@ -695,7 +632,7 @@ connection.onHover((params) => {
       propertyPath = context.parentPath ? `${context.parentPath}.${key}` : key;
     }
   } else {
-    const lines = document.getText().split("\n");
+    const lines = document.getText().split('\n');
     const currentLine = lines[params.position.line];
     const match = currentLine.match(/^([a-zA-Z0-9._-]+)=/);
     if (match) {
@@ -804,6 +741,4 @@ documents.onDidClose((e) => {
 documents.listen(connection);
 connection.listen();
 
-connection.console.log(
-  "Spring Boot Properties LSP Server started with improved completion logic and correct sibling/child suggestions.",
-);
+connection.console.log("Spring Boot Properties LSP Server started with improved completion logic and correct sibling/child suggestions.");
