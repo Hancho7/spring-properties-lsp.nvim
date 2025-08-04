@@ -32,23 +32,24 @@ M.defaults = {
 			vim.keymap.set("n", "<space>f", function()
 				vim.lsp.buf.format({ async = true })
 			end, bufopts)
+			
+			-- Enable completion
+			vim.bo[bufnr].omnifunc = "v:lua.vim.lsp.omnifunc"
 		end,
-		filetypes = { "properties", "yaml", "yml" },
+		filetypes = { "properties" }, -- Only properties files
 		root_dir = function(fname)
 			local lspconfig = require("lspconfig")
 			return lspconfig.util.find_git_ancestor(fname) or vim.fn.getcwd()
 		end,
+		settings = {},
+		single_file_support = true,
 	},
 
 	-- File patterns to activate the LSP
 	file_patterns = {
-		"application*.properties",
-		"application*.yml",
-		"application*.yaml",
-		"bootstrap*.properties",
-		"bootstrap*.yml",
-		"bootstrap*.yaml",
 		"*.properties",
+		"application*.properties",
+		"bootstrap*.properties",
 	},
 }
 
