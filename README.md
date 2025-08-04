@@ -1,57 +1,97 @@
-# spring-properties-lsp.nvim
+---
 
-A Neovim plugin that provides Language Server Protocol (LSP) support for Spring Boot application.properties and application.yml files with intelligent autocompletion, hover documentation, and validation.
+# Spring application.yml/properties LSP for Neovim
+
+Provides intelligent completion, hover documentation, and validation for Spring Boot configuration files (`application.properties`/`application.yml`).
 
 ## Features
 
-- 🚀 **Smart Autocomplete**: Intelligent property suggestions for Spring Boot configurations
-- 📖 **Hover Documentation**: Detailed property descriptions with types and default values
-- ✅ **Validation**: Real-time YAML syntax validation
-- 🎯 **Multi-format Support**: Works with both `.properties` and `.yml/.yaml` files
-- 🛠️ **Easy Setup**: Automatic server installation and configuration
-
-## Requirements
-
-- Neovim >= 0.8.0
-- Node.js >= 16.0.0
-- nvim-lspconfig
-- A completion plugin (recommended: nvim-cmp)
+- ✅ **Smart completions** for Spring Boot properties
+- 📝 **Documentation on hover** with type info and defaults
+- 🛠 **YAML/properties formatting**
+- ⚡ **Fast setup** with auto-installation
+- 🌿 **Spring profile-aware** suggestions
 
 ## Installation
 
-### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
+### Requirements
+- Neovim ≥ 0.9.0
+- Node.js ≥ 16.x
+- `nvim-lspconfig` (installed automatically)
 
+### Using [Lazy.nvim](https://github.com/folke/lazy.nvim)
 ```lua
-
-## Using lazy.vim
 {
   "Hancho7/spring-properties-lsp.nvim",
   dependencies = {
     "neovim/nvim-lspconfig",
-    "hrsh7th/cmp-nvim-lsp", -- Optional: for enhanced completion
+    "hrsh7th/cmp-nvim-lsp" -- Optional: for completions
   },
-  ft = { "properties", "yaml", "yml" },
+  ft = { "properties", "yaml", "yml" }, -- Lazy-load on filetype
   opts = {
-    -- Configuration options (see below)
-  },
+    -- See configuration options below
+  }
 }
+```
 
-## Using packer.nvim
+### Using [Packer.nvim](https://github.com/wbthomason/packer.nvim)
+```lua
 use {
   "Hancho7/spring-properties-lsp.nvim",
   requires = {
     "neovim/nvim-lspconfig",
-    "hrsh7th/cmp-nvim-lsp", -- Optional
+    "hrsh7th/cmp-nvim-lsp" -- Optional
   },
-  ft = { "properties", "yaml", "yml" },
   config = function()
     require("spring-properties-lsp").setup()
-  end,
+  end
 }
+```
 
-## Using vim-plug
-Plug 'neovim/nvim-lspconfig'
-Plug 'Hancho7/spring-properties-lsp.nvim'
+## Configuration
+Default settings (you don't need to specify these unless overriding):
+```lua
+require("spring-properties-lsp").setup({
+  auto_install = true,      -- Auto-install server on startup
+  server_dir = vim.fn.stdpath("data") .. "/spring-properties-lsp", -- Install location
+  capabilities = require("cmp_nvim_lsp").default_capabilities(), -- Completions
+  on_attach = function(client, bufnr)
+    -- Default keymaps:
+    vim.keymap.set("n", "K", vim.lsp.buf.hover, { buffer = bufnr })
+    vim.keymap.set("n", "<leader>cf", vim.lsp.buf.format, { buffer = bufnr })
+    -- Add your custom keymaps here
+  end
+})
+```
 
-" In your init.lua or after/plugin/spring-properties-lsp.lua:
-lua require("spring-properties-lsp").setup()
+## Commands
+| Command                     | Description                          |
+|-----------------------------|--------------------------------------|
+| `:SpringPropertiesLspInstall` | Manually install/update the LSP server |
+| `:SpringPropertiesLspHealth` | Verify installation health           |
+
+## Troubleshooting
+
+### Server not starting?
+1. Verify Node.js is installed:
+   ```bash
+   node --version # Should be ≥16
+   ```
+2. Check installation:
+   ```bash
+   ls ~/.local/share/nvim/spring-properties-lsp/
+   # Should show server.js, package.json, and node_modules/
+   ```
+3. View LSP logs:
+   ```vim
+   :LspLog
+   ```
+
+### Manual Installation
+```bash
+# Clean install:
+rm -rf ~/.local/share/nvim/spring-properties-lsp
+nvim +"SpringPropertiesLspInstall" +q
+```
+
+---
