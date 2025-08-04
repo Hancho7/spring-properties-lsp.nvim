@@ -1,15 +1,11 @@
 {
-  "name": "spring-properties-lsp",
-  "version": "1.0.0",
-  "description": "Language Server Protocol implementation for Spring Boot application.properties and application.yml files",
+  "name": "spring-properties-lsp-server",
+  "version": "2.0.0",
+  "description": "Language Server Protocol implementation for Spring Boot properties",
   "main": "server.js",
-  "bin": {
-    "spring-properties-lsp": "./server.js"
-  },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js --stdio",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"No tests specified\" && exit 0"
   },
   "keywords": [
     "lsp",
@@ -19,18 +15,19 @@
     "yaml",
     "autocomplete"
   ],
-  "author": "Jose Jefferson",
+  "author": "Spring Properties LSP",
   "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "dependencies": {
     "vscode-languageserver": "^8.1.0",
     "vscode-languageserver-textdocument": "^1.0.8",
     "js-yaml": "^4.1.0"
   },
-  "devDependencies": {
-    "@types/js-yaml": "^4.0.5"
-  },
-  "engines": {
-    "node": ">=16.0.0"
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hancho7/spring-properties-lsp.nvim"
   }
 }
-
