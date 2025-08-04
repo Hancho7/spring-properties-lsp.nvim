@@ -1,0 +1,11 @@
+# Node modules in server directory
+server/node_modules/
+
+# Vim/Neovim
+.nvimlog
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
