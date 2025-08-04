@@ -490,7 +490,25 @@ function findAvailableYamlProperties(
   if (parentPath) {
     // Find properties that are children of the current parent path
     candidateProps = allSpringProps.filter((prop) => {
-      return prop.startsWith(parentPath + ".") && prop !== parentPath;
+      // Match either direct children or properties at the same level
+      const propParts = prop.split(".");
+      const parentParts = parentPath.split(".");
+
+      // Check if this property is a direct child
+      if (prop.startsWith(parentPath + ".")) {
+        return true;
+      }
+
+      // Check if this property is at the same level (sibling)
+      if (parentParts.length > 0) {
+        const potentialSiblingPath = parentParts.slice(0, -1).join(".");
+        return (
+          prop.startsWith(potentialSiblingPath + ".") &&
+          !prop.startsWith(parentPath + ".")
+        );
+      }
+
+      return false;
     });
   } else {
     // At root level, include all properties
@@ -504,11 +522,27 @@ function findAvailableYamlProperties(
 
   candidateProps.forEach((prop) => {
     let nextKey;
+    let fullKeyPath;
+
     if (parentPath) {
-      const suffix = prop.substring(parentPath.length + 1);
-      nextKey = suffix.split(".")[0];
+      // Check if this is a direct child
+      if (prop.startsWith(parentPath + ".")) {
+        const suffix = prop.substring(parentPath.length + 1);
+        nextKey = suffix.split(".")[0];
+        fullKeyPath = `${parentPath}.${nextKey}`;
+      } else {
+        // This is a sibling at the same level
+        const parentParts = parentPath.split(".");
+        const potentialSiblingPath = parentParts.slice(0, -1).join(".");
+        const suffix = prop.substring(potentialSiblingPath.length + 1);
+        nextKey = suffix.split(".")[0];
+        fullKeyPath = potentialSiblingPath
+          ? `${potentialSiblingPath}.${nextKey}`
+          : nextKey;
+      }
     } else {
       nextKey = prop.split(".")[0];
+      fullKeyPath = nextKey;
     }
 
     // Filter by partial text if provided
@@ -518,8 +552,6 @@ function findAvailableYamlProperties(
     ) {
       return;
     }
-
-    const fullKeyPath = parentPath ? `${parentPath}.${nextKey}` : nextKey;
 
     // Check if this exact path already exists
     if (existingPaths.has(fullKeyPath)) {
@@ -844,49 +876,56 @@ function handlePropertiesCompletion(document, textDocumentPosition) {
     context.partialText,
   );
 
-  const completionItems = availableProps.map((propName) => {
-    const config = springProperties[propName];
-    const item = CompletionItem.create(propName);
+  const completionItems = availableProps
+    .map((propName) => {
+      const config = springProperties[propName];
+      if (!config) {
+        debugLog(`No configuration found for property: ${propName}`);
+        return null;
+      }
 
-    // Fix the undefined issue by setting all required fields
-    item.kind = CompletionItemKind.Property;
-    item.label = propName;
-    item.insertText = propName;
+      const item = CompletionItem.create(propName);
 
-    item.detail = `${config.type}${config.default !== undefined ? ` (default: ${config.default})` : ""}`;
-    item.documentation = {
-      kind: MarkupKind.Markdown,
-      value: createPropertyDocumentation(propName, config),
-    };
+      // Fix the undefined issue by setting all required fields
+      item.kind = CompletionItemKind.Property;
+      item.label = propName;
+      item.insertText = propName + "=";
 
-    // Calculate the correct replacement range
-    let replaceStartChar = textDocumentPosition.position.character;
-    let replaceEndChar = textDocumentPosition.position.character;
+      item.detail = `${config.type}${config.default !== undefined ? ` (default: ${config.default})` : ""}`;
+      item.documentation = {
+        kind: MarkupKind.Markdown,
+        value: createPropertyDocumentation(propName, config),
+      };
 
-    if (context.partialText) {
-      replaceStartChar =
-        textDocumentPosition.position.character - context.partialText.length;
-    }
+      // Calculate the correct replacement range
+      let replaceStartChar = textDocumentPosition.position.character;
+      let replaceEndChar = textDocumentPosition.position.character;
 
-    // Set up the text edit with equals sign
-    item.textEdit = {
-      range: {
-        start: {
-          line: textDocumentPosition.position.line,
-          character: replaceStartChar,
+      if (context.partialText) {
+        replaceStartChar =
+          textDocumentPosition.position.character - context.partialText.length;
+      }
+
+      // Set up the text edit with equals sign
+      item.textEdit = {
+        range: {
+          start: {
+            line: textDocumentPosition.position.line,
+            character: replaceStartChar,
+          },
+          end: {
+            line: textDocumentPosition.position.line,
+            character: replaceEndChar,
+          },
         },
-        end: {
-          line: textDocumentPosition.position.line,
-          character: replaceEndChar,
-        },
-      },
-      newText: propName + "=",
-    };
+        newText: propName + "=",
+      };
 
-    item.sortText = propName;
+      item.sortText = propName;
 
-    return item;
-  });
+      return item;
+    })
+    .filter((item) => item !== null); // Filter out any null items
 
   debugLog("Generated Properties completion items", {
     count: completionItems.length,
