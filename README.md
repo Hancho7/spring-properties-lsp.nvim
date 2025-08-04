@@ -70,28 +70,5 @@ require("spring-properties-lsp").setup({
 | `:SpringPropertiesLspInstall` | Manually install/update the LSP server |
 | `:SpringPropertiesLspHealth` | Verify installation health           |
 
-## Troubleshooting
-
-### Server not starting?
-1. Verify Node.js is installed:
-   ```bash
-   node --version # Should be ≥16
-   ```
-2. Check installation:
-   ```bash
-   ls ~/.local/share/nvim/spring-properties-lsp/
-   # Should show server.js, package.json, and node_modules/
-   ```
-3. View LSP logs:
-   ```vim
-   :LspLog
-   ```
-
-### Manual Installation
-```bash
-# Clean install:
-rm -rf ~/.local/share/nvim/spring-properties-lsp
-nvim +"SpringPropertiesLspInstall" +q
-```
 
 ---
