@@ -80,7 +80,8 @@ const springProperties = {
   },
   "spring.profiles.include": {
     type: "string",
-    description: "Unconditionally activate the specified comma-separated list of profiles",
+    description:
+      "Unconditionally activate the specified comma-separated list of profiles",
   },
   "spring.main.banner-mode": {
     type: "string",
@@ -118,7 +119,8 @@ const springProperties = {
   },
   "spring.datasource.hikari.connection-timeout": {
     type: "duration",
-    description: "Maximum number of milliseconds that a client will wait for a connection",
+    description:
+      "Maximum number of milliseconds that a client will wait for a connection",
     default: "30000ms",
   },
 
@@ -185,12 +187,14 @@ const springProperties = {
   "logging.pattern.console": {
     type: "string",
     description: "Appender pattern for output to the console",
-    default: "%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
+    default:
+      "%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
   },
   "logging.pattern.file": {
     type: "string",
     description: "Appender pattern for output to a file",
-    default: "%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
+    default:
+      "%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}",
   },
   "logging.file.name": {
     type: "string",
@@ -222,11 +226,21 @@ const springProperties = {
   "spring.cache.type": {
     type: "string",
     description: "Cache type",
-    enum: ["generic", "ehcache", "hazelcast", "infinispan", "jcache", "redis", "simple", "none"],
+    enum: [
+      "generic",
+      "ehcache",
+      "hazelcast",
+      "infinispan",
+      "jcache",
+      "redis",
+      "simple",
+      "none",
+    ],
   },
   "spring.cache.cache-names": {
     type: "string",
-    description: "Comma-separated list of cache names to create if supported by the underlying cache manager",
+    description:
+      "Comma-separated list of cache names to create if supported by the underlying cache manager",
   },
 
   // Redis properties
@@ -306,8 +320,15 @@ function isYamlFile(uri) {
  * Find all Spring Boot properties that match the given prefix
  */
 function findMatchingProperties(prefix) {
+  if (!prefix) {
+    return Object.keys(springProperties).map((key) => ({
+      property: key,
+      config: springProperties[key],
+    }));
+  }
+
   return Object.keys(springProperties)
-    .filter((key) => key.startsWith(prefix.toLowerCase()))
+    .filter((key) => key.toLowerCase().startsWith(prefix.toLowerCase()))
     .map((key) => ({
       property: key,
       config: springProperties[key],
@@ -315,18 +336,21 @@ function findMatchingProperties(prefix) {
 }
 
 /**
- * Parse YAML document and extract existing property paths
+ * Parse YAML document and build complete hierarchy map
  */
-function parseExistingYamlProperties(yamlText) {
+function parseYamlHierarchy(yamlText) {
+  const hierarchy = new Map();
   const existingPaths = new Set();
 
   try {
-    const lines = yamlText.split('\n');
+    const lines = yamlText.split("\n");
     const pathStack = [];
 
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
+
+      if (!trimmed || trimmed.startsWith("#")) continue;
 
       const indent = line.match(/^(\s*)/)[1].length;
       const keyMatch = line.match(/^\s*([a-zA-Z0-9._-]+):/);
@@ -335,56 +359,75 @@ function parseExistingYamlProperties(yamlText) {
         const key = keyMatch[1];
 
         // Adjust stack based on indentation
-        while (pathStack.length > 0 && pathStack[pathStack.length - 1].indent >= indent) {
+        while (
+          pathStack.length > 0 &&
+          pathStack[pathStack.length - 1].indent >= indent
+        ) {
           pathStack.pop();
         }
 
         // Add current key to stack
-        pathStack.push({ key, indent });
+        pathStack.push({ key, indent, line: i });
 
-        // Build full path
-        const fullPath = pathStack.map(item => item.key).join('.');
+        // Build full path and parent path
+        const fullPath = pathStack.map((item) => item.key).join(".");
+        const parentPath =
+          pathStack.length > 1
+            ? pathStack
+                .slice(0, -1)
+                .map((item) => item.key)
+                .join(".")
+            : "";
+
         existingPaths.add(fullPath);
+
+        // Store hierarchy information
+        if (!hierarchy.has(parentPath)) {
+          hierarchy.set(parentPath, new Set());
+        }
+        hierarchy.get(parentPath).add(key);
       }
     }
   } catch (error) {
-    // If parsing fails, return empty set
+    connection.console.log(`YAML parsing error: ${error.message}`);
   }
 
-  return existingPaths;
+  return { hierarchy, existingPaths };
 }
 
 /**
- * Get the current YAML context and indentation for completion
+ * Get YAML context at cursor position with accurate parent detection
  */
-function getYamlCompletionContext(document, position) {
-  const lines = document.getText().split('\n');
+function getYamlContext(document, position) {
+  const lines = document.getText().split("\n");
   const currentLine = lines[position.line];
   const beforeCursor = currentLine.substring(0, position.character);
 
   // Get current indentation
   const currentIndent = currentLine.match(/^(\s*)/)[1].length;
 
-  // Check if we're on an empty line or starting a new property
-  const isEmptyLine = beforeCursor.trim() === '';
-  const isPartialProperty = /([a-zA-Z0-9._-]+)$/.test(beforeCursor);
+  // Check what user is typing
+  const isEmptyLine = beforeCursor.trim() === "";
+  const partialMatch = beforeCursor.match(/^\s*([a-zA-Z0-9._-]*)$/);
+  const isPartialProperty = partialMatch && partialMatch[1].length > 0;
+  const partialText = isPartialProperty ? partialMatch[1] : "";
 
-  // Find the parent context by looking at previous lines
-  let parentPath = '';
+  // Find parent context by looking up the hierarchy
+  let parentPath = "";
   let parentIndent = -1;
 
+  // Look backwards to find the parent
   for (let i = position.line - 1; i >= 0; i--) {
     const line = lines[i];
     const lineIndent = line.match(/^(\s*)/)[1].length;
     const keyMatch = line.match(/^\s*([a-zA-Z0-9._-]+):/);
 
     if (keyMatch && lineIndent < currentIndent) {
-      // Found a parent key
       const key = keyMatch[1];
 
-      // Build parent path by going further up if needed
-      const upperPath = getYamlPathAtLine(lines, i);
-      parentPath = upperPath ? `${upperPath}.${key}` : key;
+      // Build the complete parent path
+      const upperParentPath = getParentPathAtLine(lines, i, lineIndent);
+      parentPath = upperParentPath ? `${upperParentPath}.${key}` : key;
       parentIndent = lineIndent;
       break;
     }
@@ -396,110 +439,108 @@ function getYamlCompletionContext(document, position) {
     parentIndent,
     isEmptyLine,
     isPartialProperty,
-    partialText: isPartialProperty ? beforeCursor.match(/([a-zA-Z0-9._-]+)$/)[1] : '',
+    partialText,
+    line: position.line,
   };
 }
 
 /**
- * Get the full YAML path at a specific line
+ * Get the parent path for a given line and indentation
  */
-function getYamlPathAtLine(lines, lineIndex) {
-  const targetLine = lines[lineIndex];
-  const targetIndent = targetLine.match(/^(\s*)/)[1].length;
-  const path = [];
-
-  // Extract key from target line
-  const keyMatch = targetLine.match(/^\s*([a-zA-Z0-9._-]+):/);
-  if (keyMatch) {
-    path.unshift(keyMatch[1]);
-  }
-
-  // Go up the hierarchy
+function getParentPathAtLine(lines, lineIndex, targetIndent) {
+  const pathParts = [];
   let currentIndent = targetIndent;
+
   for (let i = lineIndex - 1; i >= 0; i--) {
     const line = lines[i];
     const indent = line.match(/^(\s*)/)[1].length;
 
     if (indent < currentIndent) {
-      const match = line.match(/^\s*([a-zA-Z0-9._-]+):/);
-      if (match) {
-        path.unshift(match[1]);
+      const keyMatch = line.match(/^\s*([a-zA-Z0-9._-]+):/);
+      if (keyMatch) {
+        pathParts.unshift(keyMatch[1]);
         currentIndent = indent;
+        if (indent === 0) break;
       }
     }
   }
 
-  return path.slice(0, -1).join('.'); // Remove the last element as it's the current key
+  return pathParts.join(".");
 }
 
 /**
- * Find properties that can be added as siblings to existing YAML structure
+ * Find available properties that can be added as siblings
  */
-function findAvailableSiblingProperties(existingPaths, parentPath, currentIndent) {
-  // Find all properties that start with the parent path
-  const possibleProperties = Object.keys(springProperties).filter(prop => {
+function findAvailableYamlProperties(
+  existingPaths,
+  parentPath,
+  partialText = "",
+) {
+  // Get all properties that could be children of the parent path
+  const candidateProperties = Object.keys(springProperties).filter((prop) => {
     if (parentPath) {
-      return prop.startsWith(parentPath + '.');
+      return prop.startsWith(parentPath + ".") && !existingPaths.has(prop);
+    } else {
+      return !existingPaths.has(prop);
     }
-    return true;
   });
 
-  // Filter out properties that already exist
-  const availableProperties = possibleProperties.filter(prop => {
-    return !existingPaths.has(prop);
-  });
+  // Group by immediate child keys
+  const childGroups = new Map();
 
-  // Group by immediate children of parent path
-  const siblingGroups = new Map();
-
-  availableProperties.forEach(prop => {
+  candidateProperties.forEach((prop) => {
     let relativeProp = prop;
     if (parentPath) {
       relativeProp = prop.substring(parentPath.length + 1);
     }
 
-    const nextKey = relativeProp.split('.')[0];
-    const fullChildPath = parentPath ? `${parentPath}.${nextKey}` : nextKey;
+    const firstKey = relativeProp.split(".")[0];
+    const fullChildPath = parentPath ? `${parentPath}.${firstKey}` : firstKey;
 
-    if (!siblingGroups.has(nextKey)) {
-      siblingGroups.set(nextKey, {
-        key: nextKey,
+    // Filter by partial text if provided
+    if (
+      partialText &&
+      !firstKey.toLowerCase().startsWith(partialText.toLowerCase())
+    ) {
+      return;
+    }
+
+    if (!childGroups.has(firstKey)) {
+      const hasDirectProperty = springProperties.hasOwnProperty(fullChildPath);
+      const hasChildren = candidateProperties.some(
+        (p) => p.startsWith(fullChildPath + ".") && p !== fullChildPath,
+      );
+
+      childGroups.set(firstKey, {
+        key: firstKey,
         fullPath: fullChildPath,
-        hasChildren: relativeProp.includes('.'),
-        directProperty: availableProperties.find(p => p === fullChildPath)
+        hasDirectProperty,
+        hasChildren,
+        isLeaf: hasDirectProperty && !hasChildren,
       });
     }
   });
 
-  return Array.from(siblingGroups.values());
+  return Array.from(childGroups.values());
 }
 
 /**
- * Get the property being typed at the current cursor position
+ * Get property being typed at cursor position for properties files
  */
-function getPropertyAtPosition(document, position) {
-  const text = document.getText();
-  const lines = text.split("\n");
-  const line = lines[position.line];
+function getPropertiesContext(document, position) {
+  const lines = document.getText().split("\n");
+  const currentLine = lines[position.line];
+  const beforeCursor = currentLine.substring(0, position.character);
 
-  if (isYamlFile(document.uri)) {
-    const context = getYamlCompletionContext(document, position);
+  // Match partial property being typed
+  const match = beforeCursor.match(/([a-zA-Z0-9._-]*)$/);
+  const partialText = match ? match[1] : "";
 
-    if (context.isPartialProperty) {
-      // User is typing a property name
-      return context.partialText;
-    } else if (context.parentPath) {
-      // User is in a nested context
-      return context.parentPath;
-    }
-
-    return '';
-  } else {
-    // Properties file handling
-    const beforeCursor = line.substring(0, position.character);
-    const match = beforeCursor.match(/([a-zA-Z0-9._-]+)$/);
-    return match ? match[1] : "";
-  }
+  return {
+    partialText,
+    isAtEquals: beforeCursor.endsWith("="),
+    isEmptyLine: beforeCursor.trim() === "",
+  };
 }
 
 // =============================================================================
@@ -551,7 +592,10 @@ connection.onInitialize((params) => {
 
 connection.onInitialized(() => {
   if (hasConfigurationCapability) {
-    connection.client.register(DidChangeConfigurationNotification.type, undefined);
+    connection.client.register(
+      DidChangeConfigurationNotification.type,
+      undefined,
+    );
   }
   if (hasWorkspaceFolderCapability) {
     connection.workspace.onDidChangeWorkspaceFolders((_event) => {
@@ -561,20 +605,9 @@ connection.onInitialized(() => {
 });
 
 // =============================================================================
-// COMPLETION PROVIDER - ENHANCED LOGIC
+// COMPLETION PROVIDER - FIXED LOGIC
 // =============================================================================
 
-/**
- * Main completion handler with improved YAML sibling support
- *
- * LOGIC FLOW:
- * 1. Get document and validate it exists
- * 2. Determine file type and completion context
- * 3. For YAML: Parse existing structure and find available siblings
- * 4. For Properties: Handle simple key=value format
- * 5. Create intelligent completion suggestions
- * 6. Return formatted completion items
- */
 connection.onCompletion((textDocumentPosition) => {
   const document = documents.get(textDocumentPosition.textDocument.uri);
   if (!document) {
@@ -591,197 +624,124 @@ connection.onCompletion((textDocumentPosition) => {
 });
 
 /**
- * Handle completion for YAML files with smart sibling detection
+ * Handle YAML completion with proper sibling detection
  */
 function handleYamlCompletion(document, textDocumentPosition) {
-  const context = getYamlCompletionContext(document, textDocumentPosition);
-  const existingPaths = parseExistingYamlProperties(document.getText());
+  const context = getYamlContext(document, textDocumentPosition.position);
+  const { hierarchy, existingPaths } = parseYamlHierarchy(document.getText());
 
   // Find available sibling properties
-  const availableSiblings = findAvailableSiblingProperties(
+  const availableProperties = findAvailableYamlProperties(
     existingPaths,
     context.parentPath,
-    context.currentIndent
+    context.partialText,
   );
 
-  let completionItems = [];
+  const completionItems = availableProperties.map((prop) => {
+    const item = CompletionItem.create(prop.key);
+    item.kind = CompletionItemKind.Property;
 
-  if (context.isPartialProperty) {
-    // User is typing a property name - filter siblings by what they've typed
-    const filteredSiblings = availableSiblings.filter(sibling =>
-      sibling.key.toLowerCase().startsWith(context.partialText.toLowerCase())
-    );
+    // Get configuration
+    const config = springProperties[prop.fullPath];
+    if (config) {
+      item.detail = `${config.type}${config.default !== undefined ? ` (default: ${config.default})` : ""}`;
+      item.documentation = {
+        kind: MarkupKind.Markdown,
+        value: createPropertyDocumentation(prop.fullPath, config),
+      };
+    } else {
+      item.detail = "Configuration group";
+      item.documentation = {
+        kind: MarkupKind.Markdown,
+        value: `**${prop.fullPath}**\n\nConfiguration group with nested properties`,
+      };
+    }
 
-    completionItems = filteredSiblings.map(sibling =>
-      createYamlSiblingCompletionItem(sibling, context, textDocumentPosition)
-    );
-  } else if (context.isEmptyLine) {
-    // User is on an empty line - show all available siblings
-    completionItems = availableSiblings.map(sibling =>
-      createYamlSiblingCompletionItem(sibling, context, textDocumentPosition)
-    );
-  } else {
-    // Fallback to traditional property matching
-    const property = getPropertyAtPosition(document, textDocumentPosition.position);
-    const matches = findMatchingProperties(property);
+    // Calculate replacement range and text
+    let startChar = context.currentIndent;
+    let newText = prop.key;
 
-    completionItems = matches.map(match =>
-      createTraditionalYamlCompletionItem(match, document, textDocumentPosition)
-    );
-  }
+    if (context.isPartialProperty) {
+      startChar =
+        textDocumentPosition.position.character - context.partialText.length;
+    }
+
+    // Add colon and space appropriately
+    if (prop.isLeaf) {
+      newText += ": ";
+    } else {
+      newText += ":";
+    }
+
+    item.textEdit = {
+      range: {
+        start: {
+          line: textDocumentPosition.position.line,
+          character: startChar,
+        },
+        end: textDocumentPosition.position,
+      },
+      newText: newText,
+    };
+
+    // Sort by relevance
+    const sortPrefix = prop.isLeaf ? "1" : "2";
+    item.sortText = `${sortPrefix}_${prop.key}`;
+
+    return item;
+  });
 
   return completionItems;
 }
 
 /**
- * Create completion item for YAML sibling properties
- */
-function createYamlSiblingCompletionItem(sibling, context, textDocumentPosition) {
-  const item = CompletionItem.create(sibling.key);
-  item.kind = CompletionItemKind.Property;
-
-  // Get property configuration if it exists
-  const config = springProperties[sibling.fullPath];
-  if (config) {
-    item.detail = config.type;
-    item.documentation = {
-      kind: MarkupKind.Markdown,
-      value: createPropertyDocumentation(sibling.fullPath, config),
-    };
-  } else {
-    item.detail = "object";
-    item.documentation = {
-      kind: MarkupKind.Markdown,
-      value: `**${sibling.fullPath}**\n\nConfiguration group`,
-    };
-  }
-
-  // Calculate the replacement range
-  const startChar = context.isPartialProperty ?
-    textDocumentPosition.position.character - context.partialText.length :
-    context.currentIndent;
-
-  const newText = sibling.hasChildren && !sibling.directProperty ?
-    `${sibling.key}:` :
-    `${sibling.key}: `;
-
-  item.textEdit = {
-    range: {
-      start: {
-        line: textDocumentPosition.position.line,
-        character: startChar
-      },
-      end: textDocumentPosition.position,
-    },
-    newText: newText,
-  };
-
-  // Set sort priority (existing siblings should appear first)
-  item.sortText = `1_${sibling.key}`;
-
-  return item;
-}
-
-/**
- * Create traditional YAML completion item (for full property paths)
- */
-function createTraditionalYamlCompletionItem(match, document, textDocumentPosition) {
-  const item = CompletionItem.create(match.property);
-  item.kind = CompletionItemKind.Property;
-  item.detail = match.config.type;
-  item.documentation = {
-    kind: MarkupKind.Markdown,
-    value: createPropertyDocumentation(match.property, match.config),
-  };
-
-  // Convert to YAML structure
-  const yamlPath = convertToYamlPath(match.property);
-  item.insertText = yamlPath;
-
-  const line = document.getText().split("\n")[textDocumentPosition.position.line];
-  const beforeCursor = line.substring(0, textDocumentPosition.position.character);
-
-  const matchResult = beforeCursor.match(/([\w.]*)$/);
-  if (matchResult) {
-    item.textEdit = {
-      range: {
-        start: {
-          line: textDocumentPosition.position.line,
-          character: textDocumentPosition.position.character - matchResult[1].length,
-        },
-        end: textDocumentPosition.position,
-      },
-      newText: yamlPath,
-    };
-  }
-
-  item.sortText = `2_${match.property}`;
-  return item;
-}
-
-/**
- * Handle completion for Properties files
+ * Handle Properties file completion - FIXED
  */
 function handlePropertiesCompletion(document, textDocumentPosition) {
-  const property = getPropertyAtPosition(document, textDocumentPosition);
-  const matches = findMatchingProperties(property);
+  const context = getPropertiesContext(document, textDocumentPosition.position);
+
+  // Don't provide completions after equals sign
+  if (context.isAtEquals) {
+    return [];
+  }
+
+  const matches = findMatchingProperties(context.partialText);
 
   return matches.map((match) => {
-    const item = CompletionItem.create(match.property);
+    const item = CompletionItem.create(match.property); // FIX: Use match.property instead of undefined property
     item.kind = CompletionItemKind.Property;
-    item.detail = match.config.type;
+    item.detail = `${match.config.type}${match.config.default !== undefined ? ` (default: ${match.config.default})` : ""}`;
     item.documentation = {
       kind: MarkupKind.Markdown,
       value: createPropertyDocumentation(match.property, match.config),
     };
 
-    const line = document.getText().split("\n")[textDocumentPosition.position.line];
-    const beforeCursor = line.substring(0, textDocumentPosition.position.character);
-    const matchResult = beforeCursor.match(/([a-zA-Z0-9._-]*)$/);
+    // Calculate replacement range
+    const startChar =
+      textDocumentPosition.position.character - context.partialText.length;
 
-    if (matchResult) {
-      item.textEdit = {
-        range: {
-          start: {
-            line: textDocumentPosition.position.line,
-            character: textDocumentPosition.position.character - matchResult[1].length,
-          },
-          end: textDocumentPosition.position,
+    item.textEdit = {
+      range: {
+        start: {
+          line: textDocumentPosition.position.line,
+          character: startChar,
         },
-        newText: match.property + "=",
-      };
-    }
+        end: textDocumentPosition.position,
+      },
+      newText: match.property + "=",
+    };
+
+    item.sortText = match.property;
 
     return item;
   });
 }
 
 /**
- * Convert dot notation property to YAML hierarchical structure
- */
-function convertToYamlPath(property) {
-  const parts = property.split(".");
-  let yamlPath = "";
-  let indent = 0;
-
-  for (let i = 0; i < parts.length; i++) {
-    yamlPath += " ".repeat(indent) + parts[i] + ":";
-    if (i < parts.length - 1) {
-      yamlPath += "\n";
-      indent += 2;
-    } else {
-      yamlPath += " ";
-    }
-  }
-
-  return yamlPath;
-}
-
-/**
  * Create rich markdown documentation for a property
  */
 function createPropertyDocumentation(property, config) {
-  let documentation = `**${property}**\n\n${config.description}\n\n**Type:** ${config.type}`;
+  let documentation = `**${property}**\n\n${config.description}\n\n**Type:** \`${config.type}\``;
 
   if (config.default !== undefined) {
     documentation += `\n\n**Default:** \`${config.default}\``;
@@ -803,21 +763,43 @@ connection.onCompletionResolve((item) => {
 // OTHER LSP FEATURES
 // =============================================================================
 
-// Hover provider
+// Hover provider - ENHANCED
 connection.onHover((params) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) {
     return null;
   }
 
-  const property = getPropertyAtPosition(document, params.position);
-  const config = springProperties[property.toLowerCase()];
+  const isYaml = isYamlFile(document.uri);
+  let propertyPath = "";
 
+  if (isYaml) {
+    const context = getYamlContext(document, params.position);
+    const lines = document.getText().split("\n");
+    const currentLine = lines[params.position.line];
+    const keyMatch = currentLine.match(/^\s*([a-zA-Z0-9._-]+):/);
+
+    if (keyMatch) {
+      const key = keyMatch[1];
+      propertyPath = context.parentPath ? `${context.parentPath}.${key}` : key;
+    }
+  } else {
+    const propertiesContext = getPropertiesContext(document, params.position);
+    const lines = document.getText().split("\n");
+    const currentLine = lines[params.position.line];
+    const match = currentLine.match(/^([a-zA-Z0-9._-]+)=/);
+
+    if (match) {
+      propertyPath = match[1];
+    }
+  }
+
+  const config = springProperties[propertyPath.toLowerCase()];
   if (config) {
     return {
       contents: {
         kind: MarkupKind.Markdown,
-        value: createPropertyDocumentation(property, config),
+        value: createPropertyDocumentation(propertyPath, config),
       },
     };
   }
@@ -935,4 +917,6 @@ documents.listen(connection);
 // Listen on the connection
 connection.listen();
 
-connection.console.log("Spring Boot Properties LSP Server starte
+connection.console.log(
+  "Spring Boot Properties LSP Server started with enhanced YAML and Properties support",
+);
