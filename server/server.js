@@ -1,10 +1,3 @@
-// A complete rewrite of the Spring Boot Properties LSP server
-// with fixes for:
-// - Correctly inserting properties without duplicates
-// - Completing nested YAML keys accurately
-// - Proper insert behavior for `.properties`
-// - Uses a clean architecture
-
 #!/usr/bin/env node
 
 const {
@@ -13,6 +6,9 @@ const {
   ProposedFeatures,
   CompletionItemKind,
   MarkupKind,
+  TextEdit,
+  Range,
+  Position,
 } = require('vscode-languageserver/node');
 const { TextDocument } = require('vscode-languageserver-textdocument');
 const yaml = require('js-yaml');
@@ -20,162 +16,529 @@ const yaml = require('js-yaml');
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
-// Simplified Spring Boot property DB
-const SPRING_PROPS = {
-  'spring.datasource.url': 'JDBC URL for the database',
-  'spring.datasource.username': 'Database login username',
-  'spring.datasource.password': 'Database login password',
-  'spring.datasource.driver-class-name': 'JDBC driver class',
-  'server.port': 'Server HTTP port',
-  'server.ssl.enabled': 'Enable SSL (true/false)',
-  'spring.application.name': 'Application name',
+// Comprehensive Spring Boot Properties Database
+const SPRING_PROPERTIES = {
+  // Server properties
+  'server.port': {
+    description: 'Server HTTP port number (default: 8080)',
+    type: 'number',
+    default: '8080'
+  },
+  'server.address': {
+    description: 'Network address to which the server should bind',
+    type: 'string'
+  },
+  'server.servlet.context-path': {
+    description: 'Context path of the application',
+    type: 'string'
+  },
+  'server.ssl.enabled': {
+    description: 'Enable SSL support',
+    type: 'boolean',
+    default: 'false'
+  },
+  'server.ssl.key-store': {
+    description: 'Path to the key store that holds the SSL certificate',
+    type: 'string'
+  },
+  'server.ssl.key-store-password': {
+    description: 'Password to access the key store',
+    type: 'string'
+  },
+  
+  // DataSource properties
+  'spring.datasource.url': {
+    description: 'JDBC URL of the database',
+    type: 'string',
+    example: 'jdbc:mysql://localhost:3306/mydb'
+  },
+  'spring.datasource.username': {
+    description: 'Login username of the database',
+    type: 'string'
+  },
+  'spring.datasource.password': {
+    description: 'Login password of the database',
+    type: 'string'
+  },
+  'spring.datasource.driver-class-name': {
+    description: 'Fully qualified name of the JDBC driver',
+    type: 'string',
+    example: 'com.mysql.cj.jdbc.Driver'
+  },
+  'spring.datasource.hikari.maximum-pool-size': {
+    description: 'Maximum number of connections in the pool',
+    type: 'number',
+    default: '10'
+  },
+  'spring.datasource.hikari.minimum-idle': {
+    description: 'Minimum number of idle connections',
+    type: 'number',
+    default: '10'
+  },
+  
+  // JPA properties
+  'spring.jpa.hibernate.ddl-auto': {
+    description: 'DDL mode (none, validate, update, create, create-drop)',
+    type: 'string',
+    default: 'none'
+  },
+  'spring.jpa.show-sql': {
+    description: 'Enable logging of SQL statements',
+    type: 'boolean',
+    default: 'false'
+  },
+  'spring.jpa.properties.hibernate.dialect': {
+    description: 'Hibernate SQL dialect',
+    type: 'string'
+  },
+  'spring.jpa.properties.hibernate.format_sql': {
+    description: 'Format SQL statements in logs',
+    type: 'boolean',
+    default: 'false'
+  },
+  
+  // Application properties
+  'spring.application.name': {
+    description: 'Application name',
+    type: 'string'
+  },
+  'spring.profiles.active': {
+    description: 'Comma-separated list of active profiles',
+    type: 'string'
+  },
+  
+  // Logging properties
+  'logging.level.sql': {
+    description: 'SQL logging level',
+    type: 'string',
+    default: 'INFO'
+  },
+  'logging.level.org.hibernate.SQL': {
+    description: 'Hibernate SQL logging level',
+    type: 'string'
+  },
+  'logging.level.org.hibernate.type.descriptor.sql.BasicBinder': {
+    description: 'Hibernate parameter binding logging level',
+    type: 'string'
+  },
+  'logging.file.name': {
+    description: 'Log file name',
+    type: 'string'
+  },
+  'logging.file.path': {
+    description: 'Log file path',
+    type: 'string'
+  }
 };
 
-function log(msg, data) {
-  const full = data ? `${msg}: ${JSON.stringify(data)}` : msg;
-  connection.console.log('[SpringLSP] ' + full);
+function log(message, data = null) {
+  const timestamp = new Date().toISOString();
+  const logMessage = data 
+    ? `[${timestamp}] [SpringPropertiesLSP] ${message}: ${JSON.stringify(data, null, 2)}`
+    : `[${timestamp}] [SpringPropertiesLSP] ${message}`;
+  connection.console.log(logMessage);
 }
 
-function isYaml(uri) {
-  return /\.ya?ml$/i.test(uri);
+function isYamlFile(uri) {
+  return /\.(yml|yaml)$/i.test(uri);
 }
 
-function isProperties(uri) {
+function isPropertiesFile(uri) {
   return /\.properties$/i.test(uri);
 }
 
 // ============================================================================
-// YAML Processor
+// YAML Context Handler
 // ============================================================================
-class YamlContext {
-  constructor(doc) {
-    this.lines = doc.getText().split('\n');
+class YamlContextAnalyzer {
+  constructor(document) {
+    this.document = document;
+    this.lines = document.getText().split('\n');
   }
 
-  getPathAt(lineNum) {
-    const stack = [];
-    const currentIndent = this._indent(this.lines[lineNum]);
-    for (let i = lineNum; i >= 0; i--) {
+  /**
+   * Get the current property path at the given position
+   */
+  getCurrentPath(position) {
+    const currentLine = this.lines[position.line];
+    const currentIndent = this.getIndentation(currentLine);
+    const path = [];
+    
+    // Start from current line and work backwards
+    for (let i = position.line; i >= 0; i--) {
       const line = this.lines[i];
-      if (!line.trim() || line.includes('#')) continue;
-      const indent = this._indent(line);
-      const key = line.trim().split(':')[0];
-      if (indent < currentIndent) {
-        stack.unshift(key);
+      if (this.isEmptyOrComment(line)) continue;
+      
+      const indent = this.getIndentation(line);
+      const key = this.extractKey(line);
+      
+      if (!key) continue;
+      
+      if (i === position.line) {
+        // Current line - add the key if it's not empty
+        if (key.trim()) {
+          path.unshift(key);
+        }
+      } else if (indent < currentIndent) {
+        // Parent level
+        path.unshift(key);
         currentIndent = indent;
-      } else if (i === lineNum) {
-        stack.push(key);
       }
     }
-    return stack.join('.');
+    
+    return path.join('.');
   }
 
-  _indent(line) {
-    return line.match(/^\s*/)[0].length;
+  /**
+   * Get all existing property paths in the YAML
+   */
+  getExistingPaths() {
+    const paths = new Set();
+    const stack = [];
+    
+    for (const line of this.lines) {
+      if (this.isEmptyOrComment(line)) continue;
+      
+      const indent = this.getIndentation(line);
+      const key = this.extractKey(line);
+      
+      if (!key) continue;
+      
+      // Adjust stack based on indentation
+      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+        stack.pop();
+      }
+      
+      stack.push({ key, indent });
+      
+      // Build full path
+      const fullPath = stack.map(item => item.key).join('.');
+      paths.add(fullPath);
+    }
+    
+    return paths;
+  }
+
+  /**
+   * Get the prefix being typed at the cursor position
+   */
+  getTypingPrefix(position) {
+    const line = this.lines[position.line];
+    const beforeCursor = line.substring(0, position.character);
+    
+    // Extract the key part after the last colon or at the beginning
+    const match = beforeCursor.match(/([^:\s]*)$/);
+    return match ? match[1] : '';
+  }
+
+  getIndentation(line) {
+    const match = line.match(/^(\s*)/);
+    return match ? match[1].length : 0;
+  }
+
+  extractKey(line) {
+    const trimmed = line.trim();
+    if (trimmed.includes(':')) {
+      return trimmed.split(':')[0].trim();
+    }
+    return trimmed;
+  }
+
+  isEmptyOrComment(line) {
+    const trimmed = line.trim();
+    return !trimmed || trimmed.startsWith('#');
   }
 }
 
 // ============================================================================
-// Properties Context
+// Properties Context Handler
 // ============================================================================
-class PropertiesContext {
-  constructor(doc) {
-    this.lines = doc.getText().split('\n');
+class PropertiesContextAnalyzer {
+  constructor(document) {
+    this.document = document;
+    this.lines = document.getText().split('\n');
   }
 
-  getPrefixAt(pos) {
-    const line = this.lines[pos.line];
-    return line.slice(0, pos.character).split('=')[0].trim();
+  /**
+   * Get the property key being typed at the cursor position
+   */
+  getCurrentKey(position) {
+    const line = this.lines[position.line];
+    const beforeCursor = line.substring(0, position.character);
+    
+    // If there's an equals sign, get everything before it
+    if (beforeCursor.includes('=')) {
+      return beforeCursor.split('=')[0].trim();
+    }
+    
+    return beforeCursor.trim();
   }
 
+  /**
+   * Get all existing property keys
+   */
   getExistingKeys() {
-    return new Set(
-      this.lines
-        .filter(line => line.includes('='))
-        .map(line => line.split('=')[0].trim())
-    );
+    const keys = new Set();
+    
+    for (const line of this.lines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const key = trimmed.split('=')[0].trim();
+        if (key) {
+          keys.add(key);
+        }
+      }
+    }
+    
+    return keys;
+  }
+
+  /**
+   * Get the prefix being typed for completion
+   */
+  getTypingPrefix(position) {
+    const currentKey = this.getCurrentKey(position);
+    return currentKey;
   }
 }
 
-function getMatchingProps(prefix, existing) {
-  return Object.keys(SPRING_PROPS)
-    .filter(k => !existing.has(k) && k.startsWith(prefix))
-    .map(k => ({
-      label: k,
+// ============================================================================
+// Completion Provider
+// ============================================================================
+function createCompletionItems(matchingProps, format, existingKeys = new Set()) {
+  const items = [];
+  
+  for (const [key, info] of Object.entries(matchingProps)) {
+    if (existingKeys.has(key)) continue;
+    
+    const item = {
+      label: key,
       kind: CompletionItemKind.Property,
-      detail: 'Spring Boot Property',
+      detail: `Spring Boot Property (${info.type})`,
       documentation: {
         kind: MarkupKind.Markdown,
-        value: `**${k}**\n\n${SPRING_PROPS[k]}`
+        value: createDocumentation(key, info)
       },
-      insertText: k + ': '
-    }));
+      sortText: key,
+      filterText: key
+    };
+    
+    if (format === 'yaml') {
+      item.insertText = key.split('.').pop() + ': ';
+    } else {
+      item.insertText = key + '=';
+    }
+    
+    items.push(item);
+  }
+  
+  return items;
 }
 
-connection.onInitialize(() => ({
-  capabilities: {
-    textDocumentSync: 1,
-    completionProvider: {
-      triggerCharacters: ['.', ':', '='],
+function createDocumentation(key, info) {
+  let doc = `**${key}**\n\n${info.description}`;
+  
+  if (info.type) {
+    doc += `\n\n**Type:** \`${info.type}\``;
+  }
+  
+  if (info.default) {
+    doc += `\n\n**Default:** \`${info.default}\``;
+  }
+  
+  if (info.example) {
+    doc += `\n\n**Example:** \`${info.example}\``;
+  }
+  
+  return doc;
+}
+
+function findMatchingProperties(prefix, maxResults = 50) {
+  const matches = {};
+  let count = 0;
+  
+  for (const [key, info] of Object.entries(SPRING_PROPERTIES)) {
+    if (count >= maxResults) break;
+    
+    if (key.toLowerCase().includes(prefix.toLowerCase()) || 
+        key.toLowerCase().startsWith(prefix.toLowerCase())) {
+      matches[key] = info;
+      count++;
+    }
+  }
+  
+  return matches;
+}
+
+// ============================================================================
+// LSP Event Handlers
+// ============================================================================
+connection.onInitialize(() => {
+  log('Initializing Spring Properties LSP Server');
+  
+  return {
+    capabilities: {
+      textDocumentSync: {
+        openClose: true,
+        change: 2, // Incremental
+      },
+      completionProvider: {
+        triggerCharacters: ['.', ':', '=', ' '],
+        resolveProvider: false
+      },
+      hoverProvider: true
     },
-    hoverProvider: true
+    serverInfo: {
+      name: 'Spring Properties LSP',
+      version: '2.0.0'
+    }
+  };
+});
+
+connection.onCompletion(async (params) => {
+  const { textDocument, position } = params;
+  
+  try {
+    const document = documents.get(textDocument.uri);
+    if (!document) {
+      log('Document not found', { uri: textDocument.uri });
+      return [];
+    }
+
+    log('Completion requested', { 
+      uri: textDocument.uri, 
+      position,
+      line: document.getText().split('\n')[position.line]
+    });
+
+    if (isYamlFile(textDocument.uri)) {
+      return handleYamlCompletion(document, position);
+    } else if (isPropertiesFile(textDocument.uri)) {
+      return handlePropertiesCompletion(document, position);
+    }
+
+    return [];
+  } catch (error) {
+    log('Completion error', { error: error.message, stack: error.stack });
+    return [];
   }
-}));
+});
 
-connection.onCompletion(({ textDocument, position }) => {
-  const doc = documents.get(textDocument.uri);
-  if (!doc) return [];
-
-  if (isYaml(textDocument.uri)) {
-    const ctx = new YamlContext(doc);
-    const path = ctx.getPathAt(position.line).replace(/\.$/, '');
-    const existing = new Set(); // Could parse real YAML here
-    return getMatchingProps(path, existing);
+function handleYamlCompletion(document, position) {
+  const analyzer = new YamlContextAnalyzer(document);
+  const currentPath = analyzer.getCurrentPath(position);
+  const existingPaths = analyzer.getExistingPaths();
+  const prefix = analyzer.getTypingPrefix(position);
+  
+  log('YAML completion context', { currentPath, prefix, existingPaths: Array.from(existingPaths) });
+  
+  // Build search prefix - combine current path with typing prefix
+  let searchPrefix = currentPath;
+  if (prefix && !currentPath.endsWith(prefix)) {
+    searchPrefix = currentPath ? `${currentPath}.${prefix}` : prefix;
   }
+  
+  const matchingProps = findMatchingProperties(searchPrefix);
+  const completionItems = createCompletionItems(matchingProps, 'yaml', existingPaths);
+  
+  log('YAML completion results', { 
+    searchPrefix, 
+    matchCount: Object.keys(matchingProps).length,
+    itemCount: completionItems.length 
+  });
+  
+  return completionItems;
+}
 
-  if (isProperties(textDocument.uri)) {
-    const ctx = new PropertiesContext(doc);
-    const prefix = ctx.getPrefixAt(position);
-    const existing = ctx.getExistingKeys();
-    return Object.keys(SPRING_PROPS)
-      .filter(k => !existing.has(k) && k.startsWith(prefix))
-      .map(k => ({
-        label: k,
-        kind: CompletionItemKind.Property,
-        insertText: k + '=',
-        detail: 'Spring Boot Property',
-        documentation: {
+function handlePropertiesCompletion(document, position) {
+  const analyzer = new PropertiesContextAnalyzer(document);
+  const existingKeys = analyzer.getExistingKeys();
+  const prefix = analyzer.getTypingPrefix(position);
+  
+  log('Properties completion context', { prefix, existingKeys: Array.from(existingKeys) });
+  
+  const matchingProps = findMatchingProperties(prefix);
+  const completionItems = createCompletionItems(matchingProps, 'properties', existingKeys);
+  
+  log('Properties completion results', { 
+    prefix, 
+    matchCount: Object.keys(matchingProps).length,
+    itemCount: completionItems.length 
+  });
+  
+  return completionItems;
+}
+
+connection.onHover(async (params) => {
+  const { textDocument, position } = params;
+  
+  try {
+    const document = documents.get(textDocument.uri);
+    if (!document) return null;
+
+    const line = document.getText().split('\n')[position.line];
+    let propertyKey = '';
+
+    if (isYamlFile(textDocument.uri)) {
+      const analyzer = new YamlContextAnalyzer(document);
+      propertyKey = analyzer.getCurrentPath(position);
+    } else if (isPropertiesFile(textDocument.uri)) {
+      const analyzer = new PropertiesContextAnalyzer(document);
+      propertyKey = analyzer.getCurrentKey(position);
+    }
+
+    const propertyInfo = SPRING_PROPERTIES[propertyKey];
+    if (propertyInfo) {
+      return {
+        contents: {
           kind: MarkupKind.Markdown,
-          value: `**${k}**\n\n${SPRING_PROPS[k]}`
+          value: createDocumentation(propertyKey, propertyInfo)
         }
-      }));
-  }
+      };
+    }
 
-  return [];
+    return null;
+  } catch (error) {
+    log('Hover error', { error: error.message });
+    return null;
+  }
 });
 
-connection.onHover(({ textDocument, position }) => {
-  const doc = documents.get(textDocument.uri);
-  if (!doc) return;
-
-  const line = doc.getText().split('\n')[position.line];
-  let key = line.split(':')[0].trim();
-  if (isProperties(textDocument.uri)) key = line.split('=')[0].trim();
-  const desc = SPRING_PROPS[key];
-
-  if (desc) {
-    return {
-      contents: {
-        kind: MarkupKind.Markdown,
-        value: `**${key}**\n\n${desc}`
-      }
-    };
-  }
-
-  return null;
+connection.onInitialized(() => {
+  log('Spring Properties LSP Server initialized successfully');
 });
 
+// ============================================================================
+// Document Management
+// ============================================================================
+documents.onDidChangeContent(change => {
+  log('Document changed', { uri: change.document.uri });
+});
+
+documents.onDidOpen(event => {
+  log('Document opened', { uri: event.document.uri });
+});
+
+documents.onDidClose(event => {
+  log('Document closed', { uri: event.document.uri });
+});
+
+// ============================================================================
+// Error Handling
+// ============================================================================
+process.on('unhandledRejection', (reason, promise) => {
+  log('Unhandled Rejection', { reason, promise });
+});
+
+process.on('uncaughtException', (error) => {
+  log('Uncaught Exception', { error: error.message, stack: error.stack });
+  process.exit(1);
+});
+
+// ============================================================================
+// Start Server
+// ============================================================================
 documents.listen(connection);
 connection.listen();
 
-log('Clean Spring Boot LSP server running');
+log('Spring Properties LSP Server started and listening...');
