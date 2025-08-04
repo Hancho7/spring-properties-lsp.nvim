@@ -293,6 +293,160 @@ const springProperties = {
   },
 };
 
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Check if the given URI represents a properties file
+ */
+function isPropertiesFile(uri) {
+  return uri.endsWith(".properties") || uri.includes("application.properties");
+}
+
+/**
+ * Check if the given URI represents a YAML file
+ */
+function isYamlFile(uri) {
+  return (
+    uri.endsWith(".yml") ||
+    uri.endsWith(".yaml") ||
+    uri.includes("application.yml") ||
+    uri.includes("application.yaml")
+  );
+}
+
+/**
+ * Find all Spring Boot properties that match the given prefix
+ */
+function findMatchingProperties(prefix) {
+  return Object.keys(springProperties)
+    .filter((key) => key.startsWith(prefix.toLowerCase()))
+    .map((key) => ({
+      property: key,
+      config: springProperties[key],
+    }));
+}
+
+/**
+ * Convert dot notation property to YAML hierarchical structure
+ * Example: "spring.datasource.url" -> "spring:\n  datasource:\n    url:"
+ */
+function convertToYamlPath(property) {
+  const parts = property.split(".");
+  let yamlPath = "";
+  let indent = 0;
+
+  for (let i = 0; i < parts.length; i++) {
+    yamlPath += " ".repeat(indent) + parts[i] + ":";
+    if (i < parts.length - 1) {
+      yamlPath += "\n";
+      indent += 2;
+    }
+  }
+
+  return yamlPath;
+}
+
+/**
+ * Get the property path for YAML files by analyzing the hierarchical structure
+ */
+function getYamlPropertyPath(lines, lineIndex, character) {
+  const currentLine = lines[lineIndex];
+  const beforeCursor = currentLine.substring(0, character);
+
+  // Get current indentation level
+  let currentIndent = currentLine.match(/^(\s*)/)[1].length;
+
+  // Build path by going up the hierarchy
+  const path = [];
+
+  // Extract current key if we're on a key line
+  const keyMatch = beforeCursor.match(/([a-zA-Z0-9._-]+)$/);
+  if (keyMatch) {
+    path.unshift(keyMatch[1]);
+  } else {
+    // Extract key from current line
+    const lineKeyMatch = currentLine.match(/^\s*([a-zA-Z0-9._-]+):/);
+    if (lineKeyMatch) {
+      path.unshift(lineKeyMatch[1]);
+    }
+  }
+
+  // Go up the hierarchy to build the full path
+  for (let i = lineIndex - 1; i >= 0; i--) {
+    const line = lines[i];
+    const indent = line.match(/^(\s*)/)[1].length;
+
+    if (indent < currentIndent) {
+      const match = line.match(/^\s*([a-zA-Z0-9._-]+):/);
+      if (match) {
+        path.unshift(match[1]);
+        currentIndent = indent;
+      }
+    }
+  }
+
+  return path.join(".");
+}
+
+/**
+ * Get the parent path for YAML completion context
+ */
+function getYamlParentPath(document, position) {
+  const lines = document.getText().split("\n");
+  const currentLine = lines[position.line];
+  const currentIndent = currentLine.match(/^\s*/)[0].length;
+
+  // Find the parent key by looking backward for less indentation
+  for (let i = position.line - 1; i >= 0; i--) {
+    const line = lines[i];
+    const indent = line.match(/^\s*/)[0].length;
+
+    if (indent < currentIndent && line.trim().endsWith(":")) {
+      return getYamlPropertyPath(lines, i, line.length);
+    }
+  }
+  return null;
+}
+
+/**
+ * Get the property being typed at the current cursor position
+ */
+function getPropertyAtPosition(document, position) {
+  const text = document.getText();
+  const lines = text.split("\n");
+  const line = lines[position.line];
+
+  if (isYamlFile(document.uri)) {
+    // For YAML files, get the current property path context
+    const currentPath = getYamlPropertyPath(
+      lines,
+      position.line,
+      position.character,
+    );
+
+    // Handle the case where we're completing after a ":"
+    const beforeCursor = line.substring(0, position.character);
+    if (beforeCursor.trim().endsWith(":")) {
+      return currentPath; // Return full path so we can complete children
+    }
+
+    // Otherwise get the partial property being typed
+    const match = beforeCursor.match(/([a-zA-Z0-9._-]+)$/);
+    return match ? match[1] : "";
+  } else {
+    // Original properties file handling
+    const beforeCursor = line.substring(0, position.character);
+    const match = beforeCursor.match(/([a-zA-Z0-9._-]+)$/);
+    return match ? match[1] : "";
+  }
+}
+
+// =============================================================================
+// LSP SERVER INITIALIZATION
+// =============================================================================
+
 connection.onInitialize((params) => {
   const capabilities = params.capabilities;
 
@@ -350,104 +504,37 @@ connection.onInitialized(() => {
   }
 });
 
-// Helper functions
-function isPropertiesFile(uri) {
-  return uri.endsWith(".properties") || uri.includes("application.properties");
-}
+// =============================================================================
+// COMPLETION PROVIDER - MAIN LOGIC
+// =============================================================================
 
-function isYamlFile(uri) {
-  return (
-    uri.endsWith(".yml") ||
-    uri.endsWith(".yaml") ||
-    uri.includes("application.yml") ||
-    uri.includes("application.yaml")
-  );
-}
-
-function getPropertyAtPosition(document, position) {
-  const text = document.getText();
-  const lines = text.split("\n");
-  const line = lines[position.line];
-
-  if (isYamlFile(document.uri)) {
-    // For YAML files, get the current property path context
-    const currentPath = getYamlPropertyPath(
-      lines,
-      position.line,
-      position.character,
-    );
-
-    // Handle the case where we're completing after a ":"
-    const beforeCursor = line.substring(0, position.character);
-    if (beforeCursor.trim().endsWith(":")) {
-      return currentPath; // Return full path so we can complete children
-    }
-
-    // Otherwise get the partial property being typed
-    const match = beforeCursor.match(/([a-zA-Z0-9._-]+)$/);
-    return match ? match[1] : "";
-  } else {
-    // Original properties file handling
-    const beforeCursor = line.substring(0, position.character);
-    const match = beforeCursor.match(/([a-zA-Z0-9._-]+)$/);
-    return match ? match[1] : "";
-  }
-}
-function getYamlPropertyPath(lines, lineIndex, character) {
-  const currentLine = lines[lineIndex];
-  const beforeCursor = currentLine.substring(0, character);
-
-  // Get current indentation level
-  const currentIndent = currentLine.match(/^(\s*)/)[1].length;
-
-  // Build path by going up the hierarchy
-  const path = [];
-
-  // Extract current key if we're on a key line
-  const keyMatch = beforeCursor.match(/([a-zA-Z0-9._-]+)$/);
-  if (keyMatch) {
-    path.unshift(keyMatch[1]);
-  } else {
-    // Extract key from current line
-    const lineKeyMatch = currentLine.match(/^\s*([a-zA-Z0-9._-]+):/);
-    if (lineKeyMatch) {
-      path.unshift(lineKeyMatch[1]);
-    }
-  }
-
-  // Go up the hierarchy
-  for (let i = lineIndex - 1; i >= 0; i--) {
-    const line = lines[i];
-    const indent = line.match(/^(\s*)/)[1].length;
-
-    if (indent < currentIndent) {
-      const match = line.match(/^\s*([a-zA-Z0-9._-]+):/);
-      if (match) {
-        path.unshift(match[1]);
-        currentIndent = indent;
-      }
-    }
-  }
-
-  return path.join(".");
-}
-
-function findMatchingProperties(prefix) {
-  return Object.keys(springProperties)
-    .filter((key) => key.startsWith(prefix.toLowerCase()))
-    .map((key) => ({
-      property: key,
-      config: springProperties[key],
-    }));
-}
-
-// Completion provider
+/**
+ * Main completion handler - provides autocomplete suggestions for Spring Boot properties
+ *
+ * LOGIC FLOW:
+ * 1. Get the document and validate it exists
+ * 2. Extract the line text up to cursor position
+ * 3. Determine file type (YAML vs Properties)
+ * 4. For YAML: Handle hierarchical structure and indentation
+ * 5. For Properties: Handle simple key=value format
+ * 6. Find matching properties from our database
+ * 7. Create completion items with appropriate text edits
+ * 8. Return formatted completion suggestions
+ */
 connection.onCompletion((textDocumentPosition) => {
+  // Step 1: Get document and validate
   const document = documents.get(textDocumentPosition.textDocument.uri);
   if (!document) {
     return [];
   }
 
+  // Step 2: Get line text up to cursor position
+  const lineText = document.getText({
+    start: { line: textDocumentPosition.position.line, character: 0 },
+    end: textDocumentPosition.position,
+  });
+
+  // Step 3: Determine what property is being typed
   const property = getPropertyAtPosition(
     document,
     textDocumentPosition.position,
@@ -455,105 +542,178 @@ connection.onCompletion((textDocumentPosition) => {
   const matches = findMatchingProperties(property);
   const isYaml = isYamlFile(document.uri);
 
+  // Step 4: Handle special YAML completion scenarios
+  if (isYaml) {
+    const currentIndent = lineText.match(/^\s*/)[0].length;
+    const parentPath = getYamlParentPath(
+      document,
+      textDocumentPosition.position,
+    );
+
+    // Special handling for YAML sibling properties
+    if (parentPath && lineText.trim() === "") {
+      const siblings = findMatchingProperties(parentPath);
+      return createYamlSiblingCompletions(
+        siblings,
+        currentIndent,
+        textDocumentPosition.position,
+      );
+    }
+  }
+
+  // Step 5: Create completion items for all matches
   return matches.map((match) => {
     const item = CompletionItem.create(match.property);
     item.kind = CompletionItemKind.Property;
     item.detail = match.config.type;
+
+    // Create rich documentation
     item.documentation = {
       kind: MarkupKind.Markdown,
-      value: `**${match.property}**\n\n${match.config.description}\n\n**Type:** ${match.config.type}${match.config.default !== undefined ? `\n\n**Default:** \`${match.config.default}\`` : ""}${match.config.enum ? `\n\n**Valid values:** ${match.config.enum.map((v) => `\`${v}\``).join(", ")}` : ""}`,
+      value: createPropertyDocumentation(match.property, match.config),
     };
 
+    // Step 6: Handle text replacement based on file type
     if (isYaml) {
-      // For YAML files, convert dot notation to proper YAML structure
-      const yamlPath = convertToYamlPath(match.property);
-      item.insertText = yamlPath;
-
-      // Calculate the proper range for replacement
-      const line = document.getText().split("\n")[
-        textDocumentPosition.position.line
-      ];
-      const beforeCursor = line.substring(
-        0,
-        textDocumentPosition.position.character,
-      );
-
-      // Handle different completion scenarios
-      if (beforeCursor.trim().endsWith(":")) {
-        // Case: "spring:" -> should become proper YAML structure
-        item.textEdit = {
-          range: {
-            start: { line: textDocumentPosition.position.line, character: 0 },
-            end: textDocumentPosition.position,
-          },
-          newText: yamlPath,
-        };
-      } else {
-        // Default case - replace just the property part
-        const match = beforeCursor.match(/([\w.]*)$/);
-        if (match) {
-          item.textEdit = {
-            range: {
-              start: {
-                line: textDocumentPosition.position.line,
-                character:
-                  textDocumentPosition.position.character - match[1].length,
-              },
-              end: textDocumentPosition.position,
-            },
-            newText: yamlPath,
-          };
-        }
-      }
+      handleYamlCompletion(item, match, document, textDocumentPosition);
     } else {
-      // Original properties file handling
-      const line = document.getText().split("\n")[
-        textDocumentPosition.position.line
-      ];
-      const beforeCursor = line.substring(
-        0,
-        textDocumentPosition.position.character,
-      );
-      const match = beforeCursor.match(/([a-zA-Z0-9._-]*)$/);
-      if (match) {
-        item.textEdit = {
-          range: {
-            start: {
-              line: textDocumentPosition.position.line,
-              character:
-                textDocumentPosition.position.character - match[1].length,
-            },
-            end: textDocumentPosition.position,
-          },
-          newText: match.property + "=",
-        };
-      }
+      handlePropertiesCompletion(item, match, document, textDocumentPosition);
     }
 
     return item;
   });
 });
 
-// Helper function to convert dot notation to YAML path
-function convertToYamlPath(property) {
-  const parts = property.split(".");
-  let yamlPath = "";
-  let indent = 0;
+/**
+ * Create completion items for YAML sibling properties
+ */
+function createYamlSiblingCompletions(siblings, currentIndent, position) {
+  return siblings.map((match) => {
+    const item = CompletionItem.create(match.property);
+    item.kind = CompletionItemKind.Property;
+    item.detail = match.config.type;
+    item.documentation = {
+      kind: MarkupKind.Markdown,
+      value: createPropertyDocumentation(match.property, match.config),
+    };
 
-  for (let i = 0; i < parts.length; i++) {
-    yamlPath += " ".repeat(indent) + parts[i] + ":";
-    if (i < parts.length - 1) {
-      yamlPath += "\n";
-      indent += 2;
+    // Extract just the last part of the property for sibling completion
+    const propertyParts = match.property.split(".");
+    const lastPart = propertyParts[propertyParts.length - 1];
+
+    item.textEdit = {
+      range: {
+        start: { line: position.line, character: currentIndent },
+        end: position,
+      },
+      newText: `${lastPart}:`,
+    };
+
+    return item;
+  });
+}
+
+/**
+ * Handle completion for YAML files
+ */
+function handleYamlCompletion(item, match, document, textDocumentPosition) {
+  const yamlPath = convertToYamlPath(match.property);
+  item.insertText = yamlPath;
+
+  const line = document.getText().split("\n")[
+    textDocumentPosition.position.line
+  ];
+  const beforeCursor = line.substring(
+    0,
+    textDocumentPosition.position.character,
+  );
+
+  if (beforeCursor.trim().endsWith(":")) {
+    // Case: "spring:" -> should become proper YAML structure
+    item.textEdit = {
+      range: {
+        start: { line: textDocumentPosition.position.line, character: 0 },
+        end: textDocumentPosition.position,
+      },
+      newText: yamlPath,
+    };
+  } else {
+    // Default case - replace just the property part
+    const match = beforeCursor.match(/([\w.]*)$/);
+    if (match) {
+      item.textEdit = {
+        range: {
+          start: {
+            line: textDocumentPosition.position.line,
+            character:
+              textDocumentPosition.position.character - match[1].length,
+          },
+          end: textDocumentPosition.position,
+        },
+        newText: yamlPath,
+      };
     }
   }
-
-  return yamlPath;
 }
+
+/**
+ * Handle completion for Properties files
+ */
+function handlePropertiesCompletion(
+  item,
+  match,
+  document,
+  textDocumentPosition,
+) {
+  const line = document.getText().split("\n")[
+    textDocumentPosition.position.line
+  ];
+  const beforeCursor = line.substring(
+    0,
+    textDocumentPosition.position.character,
+  );
+  const matchResult = beforeCursor.match(/([a-zA-Z0-9._-]*)$/);
+
+  if (matchResult) {
+    item.textEdit = {
+      range: {
+        start: {
+          line: textDocumentPosition.position.line,
+          character:
+            textDocumentPosition.position.character - matchResult[1].length,
+        },
+        end: textDocumentPosition.position,
+      },
+      newText: match.property + "=",
+    };
+  }
+}
+
+/**
+ * Create rich markdown documentation for a property
+ */
+function createPropertyDocumentation(property, config) {
+  let documentation = `**${property}**\n\n${config.description}\n\n**Type:** ${config.type}`;
+
+  if (config.default !== undefined) {
+    documentation += `\n\n**Default:** \`${config.default}\``;
+  }
+
+  if (config.enum) {
+    documentation += `\n\n**Valid values:** ${config.enum.map((v) => `\`${v}\``).join(", ")}`;
+  }
+
+  return documentation;
+}
+
 // Completion resolve
 connection.onCompletionResolve((item) => {
   return item;
 });
+
+// =============================================================================
+// OTHER LSP FEATURES
+// =============================================================================
 
 // Hover provider
 connection.onHover((params) => {
@@ -569,7 +729,7 @@ connection.onHover((params) => {
     return {
       contents: {
         kind: MarkupKind.Markdown,
-        value: `**${property}**\n\n${config.description}\n\n**Type:** ${config.type}${config.default !== undefined ? `\n\n**Default:** \`${config.default}\`` : ""}${config.enum ? `\n\n**Valid values:** ${config.enum.map((v) => `\`${v}\``).join(", ")}` : ""}`,
+        value: createPropertyDocumentation(property, config),
       },
     };
   }
@@ -671,7 +831,6 @@ function validateDocument(document) {
   return diagnostics;
 }
 
-// Document change events
 documents.onDidChangeContent((change) => {
   const diagnostics = validateDocument(change.document);
   connection.sendDiagnostics({ uri: change.document.uri, diagnostics });
