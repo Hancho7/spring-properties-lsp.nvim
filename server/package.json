@@ -19,7 +19,7 @@
     "yaml",
     "autocomplete"
   ],
-  "author": "Your Name",
+  "author": "Jose Jefferson",
   "license": "MIT",
   "dependencies": {
     "vscode-languageserver": "^8.1.0",
