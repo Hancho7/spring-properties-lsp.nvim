@@ -1,3 +1,4 @@
+-- lua/spring-properties-lsp/init.lua
 local M = {}
 local config = require("spring-properties-lsp.config")
 local installer = require("spring-properties-lsp.installer")
@@ -17,6 +18,7 @@ end
 M.start_client = function()
 	local lspconfig = require("lspconfig")
 	local util = require("lspconfig.util")
+	local lsp = vim.lsp
 
 	local server_path = config.get_server_path()
 
@@ -30,34 +32,35 @@ M.start_client = function()
 		return
 	end
 
-	local client_config = {
-		name = "spring-properties-lsp",
-		cmd = { "node", server_path },
-		filetypes = { "yaml", "yml" },
-		root_dir = util.root_pattern("application.yml", "application.yaml", ".git"),
+	-- Register custom LSP server configuration
+	local configs = require("lspconfig.configs")
+
+	if not configs.spring_properties_lsp then
+		configs.spring_properties_lsp = {
+			default_config = {
+				cmd = { "node", server_path },
+				filetypes = { "yaml", "yml" },
+				root_dir = util.root_pattern("application.yml", "application.yaml", ".git"),
+				settings = {},
+				single_file_support = true,
+			},
+			docs = {
+				description = "Language server for Spring Boot application.yml files",
+			},
+		}
+	end
+
+	-- Setup the LSP server
+	lspconfig.spring_properties_lsp.setup({
 		settings = config.options.server_settings or {},
-		capabilities = vim.lsp.protocol.make_client_capabilities(),
+		capabilities = lsp.protocol.make_client_capabilities(),
 		on_attach = function(client, bufnr)
-			-- Enable completion
-			vim.api.nvim_buf_set_option(bufnr, "omnifunc", "v:lua.vim.lsp.omnifunc")
-
-			-- Set up keymaps
-			local opts = { noremap = true, silent = true, buffer = bufnr }
-			vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
-			vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
-			vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, opts)
-
-			if config.options.on_attach then
-				config.options.on_attach(client, bufnr)
+			-- Only attach to application.yml files
+			local filename = vim.api.nvim_buf_get_name(bufnr)
+			if not (filename:match("application%.ya?ml$")) then
+				return
 			end
-		end,
-	}
-
-	-- Only attach to application.yml files
-	vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
-		pattern = { "application.yml", "application.yaml" },
-		callback = function()
-			lspconfig.spring_properties_lsp.setup(client_config)
+			-- Your on_attach logic here
 		end,
 	})
 end
