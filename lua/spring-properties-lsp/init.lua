@@ -1,5 +1,14 @@
--- lua/spring-properties-completion/init.lua
+-- lua/spring-properties-lsp/init.lua
 local M = {}
+
+-- Debug flag
+local DEBUG = true
+
+local function debug_log(msg)
+	if DEBUG then
+		print("[SpringPropertiesLSP] " .. msg)
+	end
+end
 
 -- Spring Boot properties database with descriptions
 local spring_properties = {
@@ -237,32 +246,78 @@ local property_values = {
 	["spring.mail.properties.mail.smtp.starttls.enable"] = { "true", "false" },
 }
 
+-- Check if we can access cmp
+local function check_cmp()
+	local ok, cmp = pcall(require, "cmp")
+	if not ok then
+		debug_log("nvim-cmp not found!")
+		return false
+	end
+	debug_log("nvim-cmp found successfully")
+	return true, cmp
+end
+
 -- Setup function
 function M.setup(opts)
 	opts = opts or {}
+	debug_log("Setting up spring-properties-lsp plugin")
+
+	-- Ensure filetype detection for properties files
+	vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+		pattern = { "*.properties", "application*.properties", "application*.yml", "application*.yaml" },
+		callback = function()
+			vim.bo.filetype = "properties"
+			debug_log("Set filetype to properties for file: " .. vim.fn.expand("%"))
+		end,
+	})
+
+	-- Setup completion when cmp is available
+	vim.schedule(function()
+		M.setup_cmp_integration()
+	end)
 
 	-- Create autocommand for properties files
 	vim.api.nvim_create_autocmd("FileType", {
-		pattern = "properties",
+		pattern = { "properties", "conf" },
 		callback = function(event)
+			debug_log("FileType autocmd triggered for " .. vim.bo.filetype .. " in buffer " .. event.buf)
 			M.setup_completion(event.buf)
 		end,
 	})
 
-	-- Also trigger for existing properties buffers
-	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.bo[buf].filetype == "properties" then
-			M.setup_completion(buf)
-		end
+	-- Create commands
+	M.create_commands()
+
+	-- Setup for current buffer if it's already a properties file
+	if vim.bo.filetype == "properties" or vim.bo.filetype == "conf" then
+		debug_log("Current buffer is properties file, setting up completion")
+		M.setup_completion(0)
 	end
+
+	debug_log("Plugin setup completed")
+end
+
+-- Setup cmp integration
+function M.setup_cmp_integration()
+	local has_cmp, cmp = check_cmp()
+	if not has_cmp then
+		return
+	end
+
+	-- Register our custom source
+	debug_log("Registering spring_properties source with cmp")
+	cmp.register_source("spring_properties", M.new_source())
+	debug_log("Source registered successfully")
 end
 
 -- Setup completion for a specific buffer
 function M.setup_completion(bufnr)
-	local cmp = require("cmp")
+	debug_log("Setting up completion for buffer " .. bufnr)
 
-	-- Register custom source
-	cmp.register_source("spring_properties", M.new_source())
+	local has_cmp, cmp = check_cmp()
+	if not has_cmp then
+		return
+	end
 
 	-- Override cmp config for this buffer
 	cmp.setup.buffer({
@@ -274,23 +329,36 @@ function M.setup_completion(bufnr)
 			{ name = "path" },
 		}),
 	})
+
+	debug_log("Buffer-specific cmp configuration applied")
 end
 
 -- Create new completion source
 function M.new_source()
 	local source = {}
 
+	function source:get_debug_name()
+		return "spring_properties"
+	end
+
 	function source:get_trigger_characters()
 		return { ".", "=" }
 	end
 
 	function source:is_available()
-		return vim.bo.filetype == "properties"
+		local ft = vim.bo.filetype
+		local available = ft == "properties" or ft == "conf"
+		debug_log("Source availability check: filetype=" .. ft .. ", available=" .. tostring(available))
+		return available
 	end
 
 	function source:complete(request, callback)
+		debug_log("Completion requested at position " .. request.context.cursor.col)
+
 		local line = request.context.cursor_line
 		local col = request.context.cursor.col
+
+		debug_log("Line content: '" .. line .. "'")
 
 		local before_cursor = line:sub(1, col - 1)
 		local items = {}
@@ -301,6 +369,8 @@ function M.new_source()
 		if eq_pos then
 			-- We're completing a value
 			local prop_name = before_cursor:sub(1, eq_pos - 1):match("^%s*(.-)%s*$")
+			debug_log("Completing value for property: " .. (prop_name or "nil"))
+
 			if property_values[prop_name] then
 				for _, value in ipairs(property_values[prop_name]) do
 					table.insert(items, {
@@ -310,13 +380,15 @@ function M.new_source()
 						documentation = "Common value for " .. prop_name,
 					})
 				end
+				debug_log("Added " .. #items .. " value suggestions")
 			end
 		else
 			-- We're completing a property name
 			local partial = before_cursor:match("([^%s]*)$") or ""
+			debug_log("Completing property name with partial: '" .. partial .. "'")
 
 			for prop, info in pairs(spring_properties) do
-				if prop:lower():find(partial:lower(), 1, true) then
+				if partial == "" or prop:lower():find(partial:lower(), 1, true) then
 					local insert_text = prop
 					if info.default and info.default ~= "" then
 						insert_text = prop .. "=" .. info.default
@@ -352,8 +424,10 @@ function M.new_source()
 					})
 				end
 			end
+			debug_log("Added " .. #items .. " property suggestions")
 		end
 
+		debug_log("Returning " .. #items .. " completion items")
 		callback({ items = items })
 	end
 
@@ -362,6 +436,8 @@ end
 
 -- Commands for inserting property templates
 function M.create_commands()
+	debug_log("Creating user commands")
+
 	vim.api.nvim_create_user_command("SpringProperties", function()
 		M.show_property_menu()
 	end, { desc = "Show Spring Boot properties menu" })
@@ -373,6 +449,32 @@ function M.create_commands()
 	vim.api.nvim_create_user_command("SpringServer", function()
 		M.insert_server_template()
 	end, { desc = "Insert server configuration template" })
+
+	-- Debug command
+	vim.api.nvim_create_user_command("SpringDebug", function()
+		M.debug_info()
+	end, { desc = "Show debug information" })
+end
+
+-- Debug information
+function M.debug_info()
+	print("=== Spring Properties LSP Debug Info ===")
+	print("Current filetype: " .. vim.bo.filetype)
+	print("Buffer number: " .. vim.api.nvim_get_current_buf())
+
+	local has_cmp, cmp = check_cmp()
+	print("nvim-cmp available: " .. tostring(has_cmp))
+
+	if has_cmp then
+		local sources = cmp.get_config().sources
+		print("Active cmp sources:")
+		for i, source in ipairs(sources or {}) do
+			print("  " .. i .. ". " .. source.name)
+		end
+	end
+
+	print("Properties count: " .. vim.tbl_count(spring_properties))
+	print("=====================================")
 end
 
 -- Show property selection menu
@@ -459,11 +561,6 @@ function M.insert_server_template()
 
 	local row = vim.api.nvim_win_get_cursor(0)[1]
 	vim.api.nvim_buf_set_lines(0, row, row, false, template)
-end
-
--- Initialize the plugin
-function M.init()
-	M.create_commands()
 end
 
 return M
