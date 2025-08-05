@@ -1,4 +1,3 @@
--- lua/spring-properties-lsp/init.lua
 local M = {}
 local config = require("spring-properties-lsp.config")
 local installer = require("spring-properties-lsp.installer")
