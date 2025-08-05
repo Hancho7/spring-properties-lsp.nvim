@@ -1,13 +1,11 @@
-# Node.js dependencies
-node_modules/
-package-lock.json
-npm-debug.log*
+# Node modules in server directory
+server/node_modules/
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Editor files
+# Vim/Neovim
+.nvimlog
 *.swp
 *.swo
-*~
+
+# OS
+.DS_Store
+Thumbs.db
