@@ -1,7 +1,10 @@
-if vim.g.loaded_spring_properties_lsp then
+-- plugin/spring-properties.lua
+-- This file automatically loads when Neovim starts
+
+if vim.g.loaded_spring_properties_completion then
 	return
 end
-vim.g.loaded_spring_properties_lsp = 1
+vim.g.loaded_spring_properties_completion = 1
 
--- Auto-setup with default configuration
-require("spring-properties-lsp").setup()
+-- Initialize the plugin
+require("spring-properties-completion").init()
